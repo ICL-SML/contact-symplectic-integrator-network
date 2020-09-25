@@ -117,7 +117,7 @@ class CDLNetwork(BaseNetwork):
         v = -tf.einsum('jk,ik->ij', self.e, self.L * udot)
         r = v - self.L * (udot + w)
         ctf = self.contact(Q)
-        r = ctf * r   
+        r = ctf * r
         i = tf.einsum('jk,ik->ij', self.M_inv, self.L * r)
 
         # Velocity next step
@@ -139,6 +139,70 @@ class CDLNetwork_Simple(CDLNetwork):
         
         self.L = tf.constant([[1.]])
         self.e = e * tf.eye(self.dim_Q)
+
+class CDLNetwork_Simple_TrueContact(CDLNetwork_Simple):
+    
+    def __init__(self, step_size, horizon, name, dim_state=10, dim_h=500, activation='relu', learn_inertia=False,
+                 learn_friction=False, e=1., **kwargs):
+        super().__init__(step_size, horizon, name, dim_state, dim_h, activation, learn_inertia, learn_friction)
+
+    def step(self, x, step_size, t):
+        """Calculate next step using the CD-Lagrange integrator."""
+        u = x[:, :self.dim_Q]
+        udot = x[:, self.dim_Q:-1]
+        tct = x[:, -1]
+
+        u_next = u + step_size * udot
+        dUdu = self.grad_potential(u_next)
+        damping = tf.einsum('jk,ik->ij', self.B, udot)
+        w = tf.einsum('jk,ik->ij', self.M_inv,  step_size * (dUdu - damping))
+        
+        
+        # Contact forces
+        Q = tf.concat([u_next, udot], 1)
+        v = -tf.einsum('jk,ik->ij', self.e, self.L * udot)
+        r = v - self.L * (udot + w)
+        ctf = self.contact(Q)
+        r = tct * r   
+        i = tf.einsum('jk,ik->ij', self.M_inv, self.L * r)
+
+        # Velocity next step
+        udot_next = udot + w + i
+        
+        return tf.concat([u_next, udot_next, ctf], 1)
+
+class CDLNetwork_Simple_ExtContact(CDLNetwork):
+    
+    def __init__(self, step_size, horizon, name, ext_contact, dim_state=10, dim_h=500, activation='relu', learn_inertia=False,
+                 learn_friction=False, e=1., **kwargs):
+        super().__init__(step_size, horizon, name, dim_state, dim_h, activation, learn_inertia, learn_friction)
+        self.contact = None
+        self.ext_contact = ext_contact
+
+    def step(self, x, step_size, t):
+        """Calculate next step using the CD-Lagrange integrator."""
+        u = x[:, :self.dim_Q]
+        udot = x[:, self.dim_Q:-2]
+
+        u_next = u + step_size * udot
+        dUdu = self.grad_potential(u_next)
+        damping = tf.einsum('jk,ik->ij', self.B, udot)
+        w = tf.einsum('jk,ik->ij', self.M_inv,  step_size * (dUdu - damping))
+        
+        
+        # Contact forces
+        Q = tf.concat([u_next, udot], 1)
+        v = -tf.einsum('jk,ik->ij', self.e, self.L * udot)
+        r = v - self.L * (udot + w)
+        ctf = self.ext_contact(Q)
+        r = ctf * r   
+        i = tf.einsum('jk,ik->ij', self.M_inv, self.L * r)
+
+        # Velocity next step
+        udot_next = udot + w + i
+        
+        return tf.concat([u_next, udot_next], 1)
+
 
 class CDLNetwork_NoContact(CDLNetwork_Simple):
     
